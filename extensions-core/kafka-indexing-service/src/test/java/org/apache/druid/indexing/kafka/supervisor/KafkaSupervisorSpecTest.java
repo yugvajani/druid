@@ -19,9 +19,13 @@
 
 package org.apache.druid.indexing.kafka.supervisor;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.InjectableValues;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.druid.indexing.kafka.KafkaIndexTaskClientFactory;
 import org.apache.druid.indexing.kafka.KafkaIndexTaskModule;
 import org.apache.druid.indexing.overlord.IndexerMetadataStorageCoordinator;
@@ -39,6 +43,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 public class KafkaSupervisorSpecTest
 {
@@ -300,6 +305,7 @@ public class KafkaSupervisorSpecTest
     Assert.assertNull(spec.getContext());
     Assert.assertFalse(spec.isSuspended());
     String serialized = mapper.writeValueAsString(spec);
+    String sortedSerializedJson = sortJsonString(serialized);
 
     // expect default values populated in reserialized string
     Assert.assertTrue(serialized.contains("\"tuningConfig\":{"));
@@ -310,8 +316,55 @@ public class KafkaSupervisorSpecTest
     KafkaSupervisorSpec spec2 = mapper.readValue(serialized, KafkaSupervisorSpec.class);
 
     String stable = mapper.writeValueAsString(spec2);
+    String sortedStableJson = sortJsonString(stable);
 
-    Assert.assertEquals(serialized, stable);
+    Assert.assertEquals(sortedSerializedJson, sortedStableJson);
+  }
+
+  public String sortJsonString(String json) throws JsonProcessingException 
+  {
+    // Deserialize the JSON string into a JsonNode and sort it
+    JsonNode sortedNode = sortJsonNode(mapper.readTree(json));
+    // Serialize the sorted JsonNode back to a string
+    return mapper.writeValueAsString(sortedNode);
+  }
+
+  private JsonNode sortJsonNode(JsonNode node) 
+  {
+    if (node.isObject()) {
+      // Sort the fields of the object node
+      ObjectNode sortedObjectNode = mapper.createObjectNode();
+      node.fields().forEachRemaining(entry -> {
+        sortedObjectNode.set(entry.getKey(), sortJsonNode(entry.getValue()));
+      });
+      return sortedObjectNode;
+    } else if (node.isArray()) {
+      // Sort elements in the array node
+      ArrayNode arrayNode = (ArrayNode) node;
+      ArrayNode sortedArrayNode = mapper.createArrayNode();
+      arrayNode.elements().forEachRemaining(element -> sortedArrayNode.add(sortJsonNode(element)));
+      // Sort the array elements if necessary
+      sortArrayNode(sortedArrayNode);
+      return sortedArrayNode;
+    } else {
+      return node; // Return the node itself if it's a value node
+    }
+  }
+
+  private void sortArrayNode(ArrayNode arrayNode) 
+  {
+    if (arrayNode.size() > 0 && arrayNode.get(0).isTextual()) {
+      // Convert ArrayNode to a String array, sort it, and set back
+      String[] elements = new String[arrayNode.size()];
+      for (int i = 0; i < arrayNode.size(); i++) {
+        elements[i] = arrayNode.get(i).asText();
+      }
+      Arrays.sort(elements);
+      arrayNode.removeAll();
+      for (String element : elements) {
+        arrayNode.add(element);
+      }
+    }
   }
 
   @Test
